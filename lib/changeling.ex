@@ -67,28 +67,59 @@ defmodule Changeling do
   end
 
   defp vars_declared(function_name, args, lines) do
-    new_function(function_name, args, lines)
-    |> Z.zip()
-    |> Z.find(fn
-      {:=, _, [{_, _, _}, _]} -> true
-      _ -> false
-    end)
+    {_zipper, acc} =
+      new_function(function_name, args, lines)
+      |> Z.zip()
+      |> vars_declared(%{vars: []})
+
+    acc.vars
+  end
+
+  defp vars_declared({{:=, _, [{var, _, nil}, _]}, _rest} = zipper, acc) when is_atom(var) do
+    vars_declared(zipper |> Z.next(), put_in(acc.vars, [var | acc.vars]))
+  end
+
+  defp vars_declared(zipper, acc) do
+    if Z.end?(zipper) do
+      {zipper, put_in(acc.vars, Enum.reverse(acc.vars))}
+    else
+      vars_declared(zipper |> Z.next(), acc)
+    end
+  end
+
+  defp vars_used(function_name, args, lines) do
+    {_zipper, acc} =
+      new_function(function_name, args, lines)
+      |> Z.zip()
+      |> vars_used(%{vars: []})
+
+    acc.vars
+  end
+
+  defp vars_used({{marker, _meta, nil}, _rest} = zipper, acc) when is_atom(marker) do
+    vars_used(zipper |> Z.next(), put_in(acc.vars, [marker | acc.vars]))
+  end
+
+  defp vars_used(zipper, acc) do
+    if Z.end?(zipper) do
+      {zipper, put_in(acc.vars, Enum.reverse(acc.vars))}
+    else
+      vars_used(zipper |> Z.next(), acc)
+    end
   end
 
   defp return_declared(zipper, nil = _declares, function_name, args, lines) do
     {zipper, new_function(function_name, args, lines)}
   end
 
-  defp return_declared(zipper, declares, function_name, args, lines) do
-    {:=, _, [{var, _, _}, _]} = declares |> Z.node()
-
+  defp return_declared(zipper, [var], function_name, args, lines) when is_atom(var) do
     zipper =
       zipper
       |> top_find(fn
         {^function_name, [], []} -> true
         _ -> false
       end)
-      |> Z.replace({:=, [], [{var, [], nil}, {function_name, [], []}]})
+      |> Z.replace({:=, [], [{var, [], nil}, {function_name, [], args}]})
 
     {zipper, new_function(function_name, args, Enum.concat(lines, [{var, [], nil}]))}
   end
@@ -119,7 +150,8 @@ defmodule Changeling do
     #    nil}
     # ]
     declares = vars_declared(function_name, args, acc.lines)
-
+    used = vars_used(function_name, args, acc.lines) -- declares
+    args = Enum.map(used, fn var -> {var, [], nil} end)
     {zipper, extracted} = return_declared(zipper, declares, function_name, args, acc.lines)
 
     zipper
