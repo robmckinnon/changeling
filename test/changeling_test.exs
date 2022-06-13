@@ -27,6 +27,7 @@ defmodule ChangelingTest do
       assert [
                "defmodule Baz do",
                "  def foo(one, two) do",
+               "    three = bar()",
                "    IO.inspect(one)",
                "    IO.inspect(two)",
                "    IO.inspect(three)",
@@ -34,6 +35,7 @@ defmodule ChangelingTest do
                "",
                "  def bar() do",
                "    three = 3",
+               "    three",
                "  end",
                "end"
              ] ==
@@ -49,6 +51,7 @@ defmodule ChangelingTest do
       assert [
                "defmodule Baz do",
                "  def foo(one, two) do",
+               "    three = bar()",
                "    IO.inspect(two)",
                "    IO.inspect(three)",
                "  end",
@@ -56,6 +59,7 @@ defmodule ChangelingTest do
                "  def bar() do",
                "    three = 3",
                "    IO.inspect(one)",
+               "    three",
                "  end",
                "end"
              ] ==
@@ -72,7 +76,7 @@ defmodule ChangelingTest do
       assert "{defmodule Baz do\n   def foo(one, two) do\n     IO.inspect(one)\n     IO.inspect(two)\n     IO.inspect(three)\n   end\n end, :end}" =
                Sourceror.to_string(zipper)
 
-      assert ["{:def, :foo}", "{:lines, [three = 3]}"] =
+      assert ["{:def, :foo}", "{:lines, [three = 3]}", _] =
                lines |> Enum.map(&Sourceror.to_string(&1))
     end
 
@@ -82,7 +86,7 @@ defmodule ChangelingTest do
       assert "{defmodule Baz do\n   def foo(one, two) do\n     IO.inspect(two)\n     IO.inspect(three)\n   end\n end, :end}" =
                Sourceror.to_string(zipper)
 
-      assert ["{:def, :foo}", "{:lines, [three = 3, IO.inspect(one)]}"] =
+      assert ["{:def, :foo}", "{:lines, [three = 3, IO.inspect(one)]}", _] =
                lines |> Enum.map(&Sourceror.to_string(&1))
     end
   end
