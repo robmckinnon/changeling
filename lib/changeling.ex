@@ -66,6 +66,46 @@ defmodule Changeling do
     remove_range(zipper, from, to, %{lines: [], def: nil, replace_with: replace_with})
   end
 
+  defp vars_declared(function_name, args, lines) do
+    new_function(function_name, args, lines)
+    |> Z.zip()
+    |> Z.find(fn
+      {:=, _, [{_, _, _}, _]} -> true
+      _ -> false
+    end)
+  end
+
+  defp return_declared(zipper, nil = _declares, function_name, args, lines) do
+    {zipper, new_function(function_name, args, lines)}
+  end
+
+  defp return_declared(zipper, declares, function_name, args, lines) do
+    {:=, _, [{var, _, _}, _]} = declares |> Z.node()
+
+    zipper =
+      zipper
+      |> top_find(fn
+        {^function_name, [], []} -> true
+        _ -> false
+      end)
+      |> Z.replace({:=, [], [{var, [], nil}, {function_name, [], []}]})
+
+    {zipper, new_function(function_name, args, Enum.concat(lines, [{var, [], nil}]))}
+  end
+
+  defp new_function(function_name, args, lines) do
+    {:def, [do: [], end: []],
+     [
+       {function_name, [], args},
+       [
+         {
+           {:__block__, [], [:do]},
+           {:__block__, [], lines}
+         }
+       ]
+     ]}
+  end
+
   def extract_function(zipper, from, to, function_name) do
     {{quoted, :end}, acc} = extract_lines(zipper, from, to, function_name)
     zipper = Z.zip(quoted)
@@ -78,76 +118,44 @@ defmodule Changeling do
     #   {:two, [trailing_comments: [], leading_comments: [], line: 2, column: 16],
     #    nil}
     # ]
-    extracted =
-      {:def, [do: [], end: []],
-       [
-         {function_name, [], args},
-         [
-           {{:__block__, [], [:do]}, {:__block__, [], acc.lines}}
-         ]
-       ]}
+    declares = vars_declared(function_name, args, acc.lines)
 
-    declares =
-      extracted
-      |> Z.zip()
-      |> Z.find(fn
-        {:=, _, [{_, _, _}, _]} -> true
-        _ -> false
-      end)
-
-    {zipper, extracted} =
-      if is_nil(declares) do
-        {zipper, extracted}
-      else
-        {:=, _, [{var, _, _}, _]} = declares |> Z.node()
-
-        zipper =
-          Z.find(Z.top(zipper), fn
-            {^function_name, [], []} -> true
-            _ -> false
-          end)
-
-        {Z.replace(
-           zipper,
-           {:=, [], [{var, [], nil}, {function_name, [], []}]}
-         ),
-         {:def, [do: [], end: []],
-          [
-            {function_name, [], args},
-            [
-              {{:__block__, [], [:do]},
-               {:__block__, [], Enum.concat(acc.lines, [{var, [], nil}])}}
-            ]
-          ]}}
-      end
-
-    zipper =
-      Z.find(Z.top(zipper), fn
-        {:def, _meta, [{^enclosing, _, _}, _]} -> true
-        _ -> false
-      end)
+    {zipper, extracted} = return_declared(zipper, declares, function_name, args, acc.lines)
 
     zipper
+    |> top_find(fn
+      {:def, _meta, [{^enclosing, _, _}, _]} -> true
+      _ -> false
+    end)
     |> Z.insert_right(extracted)
     |> fix_block()
     |> Z.root()
   end
 
   defp fix_block(zipper) do
-    case Z.find(Z.top(zipper), :next, fn
-           {:{}, [], _children} -> true
-           _ -> false
-         end) do
+    zipper
+    |> top_find(fn
+      {:{}, [], _children} -> true
+      _ -> false
+    end)
+    |> case do
       nil ->
         zipper
 
       {{:{}, [], [block | defs]}, meta} ->
-        node = {
-          block,
-          {:__block__, [trailing_comments: [], leading_comments: []], defs}
+        {
+          {
+            block,
+            {:__block__, [], defs}
+          },
+          meta
         }
-
-        {node, meta}
     end
+  end
+
+  defp top_find(zipper, function) do
+    zipper
+    |> Z.top()
+    |> Z.find(function)
   end
 end
