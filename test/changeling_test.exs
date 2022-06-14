@@ -3,11 +3,13 @@ defmodule ChangelingTest do
   # doctest Changeling
   alias Sourceror.Zipper, as: Z
 
-  setup do
+  setup ctx do
+    no = Map.get(ctx, :no, "")
+
     {:ok,
      quoted:
        """
-       defmodule Baz do
+       defmodule Baz#{no} do
          def foo(one, two) do
            three = 3
            IO.inspect(one)
@@ -23,12 +25,13 @@ defmodule ChangelingTest do
   end
 
   describe "extract_function" do
+    @tag no: 1
     test "extract one line to function", %{quoted: quoted} do
       zipper = Changeling.extract_function(Z.zip(quoted), 3, 3, :bar)
       source = Sourceror.to_string(zipper)
 
       assert [
-               "defmodule Baz do",
+               "defmodule Baz1 do",
                "  def foo(one, two) do",
                "    three = bar()",
                "    IO.inspect(one)",
@@ -50,12 +53,13 @@ defmodule ChangelingTest do
       Code.eval_string(source)
     end
 
+    @tag no: 2
     test "extract multiple lines to function", %{quoted: quoted} do
       zipper = Changeling.extract_function(Z.zip(quoted), 3, 4, :bar)
       source = Sourceror.to_string(zipper)
 
       assert [
-               "defmodule Baz do",
+               "defmodule Baz2 do",
                "  def foo(one, two) do",
                "    three = bar(one)",
                "    IO.inspect(two)",
@@ -77,12 +81,13 @@ defmodule ChangelingTest do
       Code.eval_string(source)
     end
 
+    @tag no: 3
     test "extract multiple lines with multiple returns to function", %{quoted: quoted} do
       zipper = Changeling.extract_function(Z.zip(quoted), 3, 7, :bar)
       source = Sourceror.to_string(zipper)
 
       assert [
-               "defmodule Baz do",
+               "defmodule Baz3 do",
                "  def foo(one, two) do",
                "    {three, four} = bar(one, two)",
                "    IO.inspect(three)",
