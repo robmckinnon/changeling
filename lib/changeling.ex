@@ -5,8 +5,8 @@ defmodule Changeling do
 
   alias Sourceror.Zipper, as: Z
 
-  defp d({{n, _, _}, _} = zipper, lab) do
-    IO.inspect(n, label: lab)
+  defp d({{_n, _, _}, _} = zipper, _lab) do
+    # IO.inspect(n, label: lab)
     zipper
   end
 
@@ -124,6 +124,39 @@ defmodule Changeling do
     {zipper, new_function(function_name, args, Enum.concat(lines, [{var, [], nil}]))}
   end
 
+  defp return_declared(zipper, declares, function_name, args, lines) when is_list(declares) do
+    declares = Enum.reduce(declares, {}, fn var, acc -> Tuple.append(acc, {var, [], nil}) end)
+
+    zipper =
+      zipper
+      |> top_find(fn
+        {^function_name, [], []} -> true
+        _ -> false
+      end)
+      |> Z.replace(
+        {:=, [],
+         [
+           {:__block__, [],
+            [
+              declares
+            ]},
+           {function_name, [], args}
+         ]}
+      )
+
+    {zipper,
+     new_function(
+       function_name,
+       args,
+       Enum.concat(lines, [
+         {:__block__, [],
+          [
+            declares
+          ]}
+       ])
+     )}
+  end
+
   defp new_function(function_name, args, lines) do
     {:def, [do: [], end: []],
      [
@@ -140,19 +173,13 @@ defmodule Changeling do
   def extract_function(zipper, from, to, function_name) do
     {{quoted, :end}, acc} = extract_lines(zipper, from, to, function_name)
     zipper = Z.zip(quoted)
-    enclosing = acc.def
 
-    args = []
-    # [
-    #   {:one, [trailing_comments: [], leading_comments: [], line: 2, column: 11],
-    #    nil},
-    #   {:two, [trailing_comments: [], leading_comments: [], line: 2, column: 16],
-    #    nil}
-    # ]
-    declares = vars_declared(function_name, args, acc.lines)
-    used = vars_used(function_name, args, acc.lines) -- declares
-    args = Enum.map(used, fn var -> {var, [], nil} end)
+    declares = vars_declared(function_name, [], acc.lines) |> Enum.uniq()
+    used = vars_used(function_name, [], acc.lines) |> Enum.uniq()
+    args = Enum.map(used -- declares, fn var -> {var, [], nil} end)
     {zipper, extracted} = return_declared(zipper, declares, function_name, args, acc.lines)
+
+    enclosing = acc.def
 
     zipper
     |> top_find(fn
