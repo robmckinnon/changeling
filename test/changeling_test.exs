@@ -108,6 +108,34 @@ defmodule ChangelingTest do
 
       Code.eval_string(source)
     end
+
+    @tag no: 4
+    test "extract multiple lines with single return value to function", %{quoted: quoted} do
+      zipper = Changeling.extract_function(Z.zip(quoted), 3, 8, :bar)
+      source = Sourceror.to_string(zipper)
+
+      assert [
+               "defmodule Baz4 do",
+               "  def foo(one, two) do",
+               "    four = bar(one, two)",
+               "    IO.inspect(four)",
+               "  end",
+               "",
+               "  def bar(one, two) do",
+               "    three = 3",
+               "    IO.inspect(one)",
+               "    IO.inspect(two)",
+               "    IO.inspect(three)",
+               "    four = 4",
+               "    IO.inspect(three)",
+               "    four",
+               "  end",
+               "end"
+             ] ==
+               source |> String.split("\n")
+
+      Code.eval_string(source)
+    end
   end
 
   describe "extract_lines/3" do
@@ -117,8 +145,13 @@ defmodule ChangelingTest do
       assert "{defmodule Baz do\n   def foo(one, two) do\n     IO.inspect(one)\n     IO.inspect(two)\n     IO.inspect(three)\n     four = 4\n     IO.inspect(three)\n     IO.inspect(four)\n   end\n end, :end}" =
                Sourceror.to_string(zipper)
 
-      assert ["{:def, :foo}", "{:lines, [three = 3]}", _] =
-               lines |> Enum.map(&Sourceror.to_string(&1))
+      assert [
+               "{:def, :foo}",
+               "{:def_end, 10}",
+               "{:lines, [three = 3]}",
+               _,
+               "{:vars, [:one, :two, :three, :four]}"
+             ] = lines |> Enum.map(&Sourceror.to_string(&1))
     end
 
     test "extract multiple lines to function", %{quoted: quoted} do
@@ -127,8 +160,13 @@ defmodule ChangelingTest do
       assert "{defmodule Baz do\n   def foo(one, two) do\n     IO.inspect(two)\n     IO.inspect(three)\n     four = 4\n     IO.inspect(three)\n     IO.inspect(four)\n   end\n end, :end}" =
                Sourceror.to_string(zipper)
 
-      assert ["{:def, :foo}", "{:lines, [three = 3, IO.inspect(one)]}", _] =
-               lines |> Enum.map(&Sourceror.to_string(&1))
+      assert [
+               "{:def, :foo}",
+               "{:def_end, 10}",
+               "{:lines, [three = 3, IO.inspect(one)]}",
+               _,
+               "{:vars, [:two, :three, :four]}"
+             ] = lines |> Enum.map(&Sourceror.to_string(&1))
     end
   end
 end

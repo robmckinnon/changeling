@@ -15,7 +15,8 @@ defmodule Changeling do
   defp remove_range({{:def, meta, [{marker, _, _}, _]}, _list} = zipper, from, to, acc) do
     acc =
       if meta[:line] < from do
-        put_in(acc.def, marker)
+        x = put_in(acc.def, marker)
+        put_in(x.def_end, meta[:end][:line])
       else
         acc
       end
@@ -23,13 +24,21 @@ defmodule Changeling do
     zipper |> Z.next() |> remove_range(from, to, acc)
   end
 
-  defp remove_range({{marker, meta, _children}, _list} = zipper, from, to, acc) do
+  defp remove_range({{marker, meta, children}, _list} = zipper, from, to, acc) do
     if Z.end?(zipper) do
       d(zipper, "end")
-      {zipper, put_in(acc.lines, Enum.reverse(acc.lines))}
+      acc = put_in(acc.lines, Enum.reverse(acc.lines))
+      {zipper, put_in(acc.vars, Enum.reverse(acc.vars))}
     else
       if meta[:line] < from || meta[:line] > to || marker == :__block__ do
         # if Z.root(zipper) == Z.node(zipper) do
+        acc =
+          if meta[:line] > to && meta[:line] < acc.def_end && is_atom(marker) && is_nil(children) do
+            put_in(acc.vars, [marker | acc.vars] |> Enum.uniq())
+          else
+            acc
+          end
+
         zipper |> Z.next() |> remove_range(from, to, acc)
       else
         acc = put_in(acc.lines, [Z.node(zipper) | acc.lines])
@@ -63,7 +72,13 @@ defmodule Changeling do
   Return zipper containing AST for lines in the range from-to.
   """
   def extract_lines(zipper, from, to, replace_with \\ nil) do
-    remove_range(zipper, from, to, %{lines: [], def: nil, replace_with: replace_with})
+    remove_range(zipper, from, to, %{
+      lines: [],
+      def: nil,
+      def_end: nil,
+      vars: [],
+      replace_with: replace_with
+    })
   end
 
   defp vars_declared(function_name, args, lines) do
@@ -177,7 +192,8 @@ defmodule Changeling do
     declares = vars_declared(function_name, [], acc.lines) |> Enum.uniq()
     used = vars_used(function_name, [], acc.lines) |> Enum.uniq()
     args = Enum.map(used -- declares, fn var -> {var, [], nil} end)
-    {zipper, extracted} = return_declared(zipper, declares, function_name, args, acc.lines)
+    returns = declares |> Enum.filter(&(&1 in acc.vars))
+    {zipper, extracted} = return_declared(zipper, returns, function_name, args, acc.lines)
 
     enclosing = acc.def
 
