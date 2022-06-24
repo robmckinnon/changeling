@@ -5,6 +5,28 @@ defmodule Changeling do
 
   alias Sourceror.Zipper, as: Z
 
+  def extract_function(zipper, from, to, function_name) do
+    {{quoted, :end}, acc} = extract_lines(zipper, from, to, function_name)
+    zipper = Z.zip(quoted)
+
+    declares = vars_declared(function_name, [], acc.lines) |> Enum.uniq()
+    used = vars_used(function_name, [], acc.lines) |> Enum.uniq()
+    args = Enum.map(used -- declares, fn var -> {var, [], nil} end)
+    returns = declares |> Enum.filter(&(&1 in acc.vars))
+    {zipper, extracted} = return_declared(zipper, returns, function_name, args, acc.lines)
+
+    enclosing = acc.def
+
+    zipper
+    |> top_find(fn
+      {:def, _meta, [{^enclosing, _, _}, _]} -> true
+      _ -> false
+    end)
+    |> Z.insert_right(extracted)
+    |> fix_block()
+    |> Z.root()
+  end
+
   defp d({{_n, _, _}, _} = zipper, _lab) do
     # IO.inspect(n, label: lab)
     zipper
@@ -183,28 +205,6 @@ defmodule Changeling do
          }
        ]
      ]}
-  end
-
-  def extract_function(zipper, from, to, function_name) do
-    {{quoted, :end}, acc} = extract_lines(zipper, from, to, function_name)
-    zipper = Z.zip(quoted)
-
-    declares = vars_declared(function_name, [], acc.lines) |> Enum.uniq()
-    used = vars_used(function_name, [], acc.lines) |> Enum.uniq()
-    args = Enum.map(used -- declares, fn var -> {var, [], nil} end)
-    returns = declares |> Enum.filter(&(&1 in acc.vars))
-    {zipper, extracted} = return_declared(zipper, returns, function_name, args, acc.lines)
-
-    enclosing = acc.def
-
-    zipper
-    |> top_find(fn
-      {:def, _meta, [{^enclosing, _, _}, _]} -> true
-      _ -> false
-    end)
-    |> Z.insert_right(extracted)
-    |> fix_block()
-    |> Z.root()
   end
 
   defp fix_block(zipper) do
