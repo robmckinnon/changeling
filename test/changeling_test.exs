@@ -4,24 +4,29 @@ defmodule ChangelingTest do
   alias Sourceror.Zipper, as: Z
 
   setup ctx do
-    no = Map.get(ctx, :no, "")
+    if Map.has_key?(ctx, :no_setup) do
+      {:ok, []}
+    else
+      no = Map.get(ctx, :no, "")
 
-    {:ok,
-     quoted:
-       """
-       defmodule Baz#{no} do
-         def foo(one, two) do
-           three = 3
-           IO.inspect(one)
-           IO.inspect(two)
-           IO.inspect(three)
-           four = 4
-           IO.inspect(three)
-           IO.inspect(four)
+      {:ok,
+       quoted:
+         """
+         defmodule Baz#{no} do
+           def foo(one, two) do
+             three = 3
+             IO.inspect(one)
+             IO.inspect(two)
+             IO.inspect(three)
+             four = 4
+             IO.inspect(three)
+             IO.inspect(four)
+             # comment
+           end
          end
-       end
-       """
-       |> Sourceror.parse_string!()}
+         """
+         |> Sourceror.parse_string!()}
+    end
   end
 
   describe "extract_function" do
@@ -40,6 +45,8 @@ defmodule ChangelingTest do
                "    four = 4",
                "    IO.inspect(three)",
                "    IO.inspect(four)",
+               "",
+               "    # comment",
                "  end",
                "",
                "  def bar() do",
@@ -67,6 +74,8 @@ defmodule ChangelingTest do
                "    four = 4",
                "    IO.inspect(three)",
                "    IO.inspect(four)",
+               "",
+               "    # comment",
                "  end",
                "",
                "  def bar(one) do",
@@ -92,6 +101,8 @@ defmodule ChangelingTest do
                "    {three, four} = bar(one, two)",
                "    IO.inspect(three)",
                "    IO.inspect(four)",
+               "",
+               "    # comment",
                "  end",
                "",
                "  def bar(one, two) do",
@@ -119,6 +130,8 @@ defmodule ChangelingTest do
                "  def foo(one, two) do",
                "    four = bar(one, two)",
                "    IO.inspect(four)",
+               "",
+               "    # comment",
                "  end",
                "",
                "  def bar(one, two) do",
@@ -142,12 +155,12 @@ defmodule ChangelingTest do
     test "extract one line to function", %{quoted: quoted} do
       {zipper, lines} = Changeling.extract_lines(Z.zip(quoted), 3, 3)
 
-      assert "{defmodule Baz do\n   def foo(one, two) do\n     IO.inspect(one)\n     IO.inspect(two)\n     IO.inspect(three)\n     four = 4\n     IO.inspect(three)\n     IO.inspect(four)\n   end\n end, :end}" =
+      assert "defmodule Baz do\n  def foo(one, two) do\n    IO.inspect(one)\n    IO.inspect(two)\n    IO.inspect(three)\n    four = 4\n    IO.inspect(three)\n    IO.inspect(four)\n\n    # comment\n  end\nend" ==
                Sourceror.to_string(zipper)
 
       assert [
                "{:def, :foo}",
-               "{:def_end, 10}",
+               "{:def_end, 11}",
                "{:lines, [three = 3]}",
                _,
                "{:vars, [:one, :two, :three, :four]}"
@@ -157,12 +170,12 @@ defmodule ChangelingTest do
     test "extract multiple lines to function", %{quoted: quoted} do
       {zipper, lines} = Changeling.extract_lines(Z.zip(quoted), 3, 4)
 
-      assert "{defmodule Baz do\n   def foo(one, two) do\n     IO.inspect(two)\n     IO.inspect(three)\n     four = 4\n     IO.inspect(three)\n     IO.inspect(four)\n   end\n end, :end}" =
+      assert "defmodule Baz do\n  def foo(one, two) do\n    IO.inspect(two)\n    IO.inspect(three)\n    four = 4\n    IO.inspect(three)\n    IO.inspect(four)\n\n    # comment\n  end\nend" =
                Sourceror.to_string(zipper)
 
       assert [
                "{:def, :foo}",
-               "{:def_end, 10}",
+               "{:def_end, 11}",
                "{:lines, [three = 3, IO.inspect(one)]}",
                _,
                "{:vars, [:two, :three, :four]}"
