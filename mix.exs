@@ -20,7 +20,7 @@ defmodule Changeling.MixProject do
   defp deps do
     [
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:sourceror, "~> 0.11.1"}
+      {:sourceror, "~> 0.12"}
     ]
   end
 end
