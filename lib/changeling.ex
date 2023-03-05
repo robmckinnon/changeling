@@ -6,7 +6,7 @@ defmodule Changeling do
   alias Sourceror.Zipper, as: Z
 
   def extract_function(zipper, from, to, function_name) do
-    {{quoted, :end}, acc} = extract_lines(zipper, from, to, function_name)
+    {quoted, acc} = extract_lines(zipper, from, to, function_name)
     zipper = Z.zip(quoted)
 
     declares = vars_declared(function_name, [], acc.lines) |> Enum.uniq()
@@ -27,69 +27,6 @@ defmodule Changeling do
     |> Z.root()
   end
 
-  defp d({{_n, _, _}, _} = zipper, _lab) do
-    # IO.inspect(n, label: lab)
-    zipper
-  end
-
-  defp d(zipper, _), do: zipper
-
-  defp remove_range({{:def, meta, [{marker, _, _}, _]}, _list} = zipper, from, to, acc) do
-    acc =
-      if meta[:line] < from do
-        x = put_in(acc.def, marker)
-        put_in(x.def_end, meta[:end][:line])
-      else
-        acc
-      end
-
-    zipper |> Z.next() |> remove_range(from, to, acc)
-  end
-
-  defp remove_range({{marker, meta, children}, _list} = zipper, from, to, acc) do
-    if Z.end?(zipper) do
-      d(zipper, "end")
-      acc = put_in(acc.lines, Enum.reverse(acc.lines))
-      {zipper, put_in(acc.vars, Enum.reverse(acc.vars))}
-    else
-      if meta[:line] < from || meta[:line] > to || marker == :__block__ do
-        # if Z.root(zipper) == Z.node(zipper) do
-        acc =
-          if meta[:line] > to && meta[:line] < acc.def_end && is_atom(marker) && is_nil(children) do
-            put_in(acc.vars, [marker | acc.vars] |> Enum.uniq())
-          else
-            acc
-          end
-
-        zipper |> Z.next() |> remove_range(from, to, acc)
-      else
-        acc = put_in(acc.lines, [Z.node(zipper) | acc.lines])
-
-        if is_nil(acc.replace_with) do
-          zipper |> Z.remove() |> Z.next() |> remove_range(from, to, acc)
-        else
-          function_name = acc.replace_with
-          acc = put_in(acc.replace_with, nil)
-
-          zipper
-          |> Z.replace({function_name, [], []})
-          |> Z.next()
-          |> remove_range(from, to, acc)
-        end
-      end
-    end
-  end
-
-  defp remove_range(zipper, from, to, acc) do
-    if Z.end?(zipper) do
-      d(zipper, "end2")
-      {zipper, put_in(acc.lines, Enum.reverse(acc.lines))}
-    else
-      d(zipper, "remove2")
-      zipper |> Z.next() |> remove_range(from, to, acc)
-    end
-  end
-
   @doc """
   Return zipper containing AST for lines in the range from-to.
   """
@@ -103,46 +40,108 @@ defmodule Changeling do
     })
   end
 
-  defp vars_declared(function_name, args, lines) do
-    {_zipper, acc} =
-      new_function(function_name, args, lines)
-      |> Z.zip()
-      |> vars_declared(%{vars: []})
+  defp next_remove_range(zipper, from, to, acc) do
+    if next = Z.next(zipper) do
+      remove_range(next, from, to, acc)
+    else
+      # return zipper with lines removed
+      {
+        elem(Z.top(zipper), 0),
+        %{acc | lines: Enum.reverse(acc.lines), vars: Enum.reverse(acc.vars)}
+      }
+    end
+  end
 
-    acc.vars
+  defp remove_range({{:def, meta, [{marker, _, _}, _]}, _list} = zipper, from, to, acc) do
+    acc =
+      if meta[:line] < from do
+        x = put_in(acc.def, marker)
+        put_in(x.def_end, meta[:end][:line])
+      else
+        acc
+      end
+
+    next_remove_range(zipper, from, to, acc)
+  end
+
+  defp remove_range({{marker, meta, children}, _list} = zipper, from, to, acc) do
+    if meta[:line] < from || meta[:line] > to || marker == :__block__ do
+      next_remove_range(
+        zipper,
+        from,
+        to,
+        if meta[:line] > to && meta[:line] < acc.def_end && is_atom(marker) && is_nil(children) do
+          put_in(acc.vars, [marker | acc.vars] |> Enum.uniq())
+        else
+          acc
+        end
+      )
+    else
+      acc = put_in(acc.lines, [Z.node(zipper) | acc.lines])
+
+      if is_nil(acc.replace_with) do
+        zipper
+        |> Z.remove()
+        |> next_remove_range(from, to, acc)
+      else
+        function_name = acc.replace_with
+        acc = put_in(acc.replace_with, nil)
+
+        zipper
+        |> Z.replace({function_name, [], []})
+        |> next_remove_range(from, to, acc)
+      end
+    end
+  end
+
+  defp remove_range(zipper, from, to, acc) do
+    next_remove_range(zipper, from, to, acc)
+  end
+
+  defp vars_declared(function_name, args, lines) do
+    function_name
+    |> new_function(args, lines)
+    |> Z.zip()
+    |> vars_declared(%{vars: []})
+  end
+
+  defp vars_declared(nil, acc) do
+    Enum.reverse(acc.vars)
   end
 
   defp vars_declared({{:=, _, [{var, _, nil}, _]}, _rest} = zipper, acc) when is_atom(var) do
-    vars_declared(zipper |> Z.next(), put_in(acc.vars, [var | acc.vars]))
+    zipper
+    |> Z.next()
+    |> vars_declared(put_in(acc.vars, [var | acc.vars]))
   end
 
   defp vars_declared(zipper, acc) do
-    if Z.end?(zipper) do
-      {zipper, put_in(acc.vars, Enum.reverse(acc.vars))}
-    else
-      vars_declared(zipper |> Z.next(), acc)
-    end
+    zipper
+    |> Z.next()
+    |> vars_declared(acc)
   end
 
   defp vars_used(function_name, args, lines) do
-    {_zipper, acc} =
-      new_function(function_name, args, lines)
-      |> Z.zip()
-      |> vars_used(%{vars: []})
+    function_name
+    |> new_function(args, lines)
+    |> Z.zip()
+    |> vars_used(%{vars: []})
+  end
 
-    acc.vars
+  defp vars_used(nil, acc) do
+    Enum.reverse(acc.vars)
   end
 
   defp vars_used({{marker, _meta, nil}, _rest} = zipper, acc) when is_atom(marker) do
-    vars_used(zipper |> Z.next(), put_in(acc.vars, [marker | acc.vars]))
+    zipper
+    |> Z.next()
+    |> vars_used(put_in(acc.vars, [marker | acc.vars]))
   end
 
   defp vars_used(zipper, acc) do
-    if Z.end?(zipper) do
-      {zipper, put_in(acc.vars, Enum.reverse(acc.vars))}
-    else
-      vars_used(zipper |> Z.next(), acc)
-    end
+    zipper
+    |> Z.next()
+    |> vars_used(acc)
   end
 
   defp return_declared(zipper, nil = _declares, function_name, args, lines) do
